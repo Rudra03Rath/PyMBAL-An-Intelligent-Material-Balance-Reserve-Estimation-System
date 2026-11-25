@@ -1,0 +1,35 @@
+{
+    "reservoir": {
+        "initial_pressure_psia": 4000,
+        "initial_temperature_F": 200,
+        "initial_water_saturation": 0.25,
+        "formation_compressibility_psi_inv": 0.000006,
+        "water_compressibility_psi_inv": 0.000003,
+        "gas_cap_ratio": 0.0
+    },
+
+    "fluid": {
+        "oil_api": 35,
+        "gas_gravity": 0.80,
+        "water_salinity_wt_pct": 5.0
+    },
+
+    "aquifer": {
+        "enabled": true,
+        "model": "van_everdingen_hurst",
+        "aquifer_permeability_md": 100.0,
+        "aquifer_porosity": 0.20,
+        "aquifer_thickness_ft": 100.0,
+        "total_compressibility_psi_inv": 2.0e-5,
+        "water_viscosity_cp": 0.50,
+        "reservoir_radius_ft": 1000.0,
+        "encroachment_angle_deg": 360.0
+    },
+
+    "gas_cap": {
+        "enabled": true,
+        "mode": "manual",
+        "m": 0.30,
+        "m_bounds": [0.0, 2.0]
+    }
+}

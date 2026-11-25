@@ -1,0 +1,8 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy
+import plotly
+import streamlit
+
+print("All libraries installed successfully!")
