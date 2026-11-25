@@ -1,464 +1,469 @@
-# PyMBAL: An Intelligent Material Balance & Reserve Estimation System
+# PyMBAL — Intelligent Material Balance & Reserve Evaluation System
 
-PyMBAL is a Python-based petroleum engineering project designed to
-support reservoir-fluid property preparation and, as the project
-develops, material-balance analysis, reservoir-drive interpretation,
-hydrocarbon-in-place estimation, and production/reserves evaluation.
+**PyMBAL** is a Python-based reservoir engineering application that integrates PVT preparation, material-balance analysis, coupled gas-cap/aquifer model selection, drive-mechanism interpretation, volumetric estimation, forecasting, decline-curve analysis, and technical-reserves evaluation in one workflow.
 
-The engineering objective is to help a reservoir engineer organize
-production, pressure, and PVT data into a consistent workflow for
-understanding reservoir depletion and estimating reservoir performance.
+The project is designed as an engineering decision-support and learning tool. It converts reservoir production and pressure history into a set of competing physical interpretations, quantifies uncertainty/identifiability where implemented, and presents the results through a Streamlit dashboard and structured report.
 
-> **Project status:** The public repository currently contains the
-> data-loading, validation, cleaning, and PVT-preparation workflow. The
-> broader material-balance, aquifer-calibration, drive-mechanism,
-> forecasting, and reserves capabilities described below are planned
-> development stages and should not be interpreted as fully implemented
-> in the current release.
+> **Important:** PyMBAL is not a commercial reservoir simulator or a substitute for engineering judgement. A mathematically best-fitting model is not necessarily a uniquely proven physical description of the reservoir. Review competing candidates, identifiability warnings, input assumptions, and independent reservoir information before interpreting results.
 
-------------------------------------------------------------------------
+---
 
-## Table of contents
+## Contents
 
--   [Project objectives](#project-objectives)
--   [Current implementation](#current-implementation)
--   [Engineering workflow](#engineering-workflow)
--   [PVT calculation methods](#pvt-calculation-methods)
--   [Input data](#input-data)
--   [Installation](#installation)
--   [Running the current workflow](#running-the-current-workflow)
--   [Engineering background](#engineering-background)
--   [Planned development roadmap](#planned-development-roadmap)
--   [Current limitations and engineering
-    cautions](#current-limitations-and-engineering-cautions)
--   [Repository structure](#repository-structure)
--   [Disclaimer](#disclaimer)
+- [Capabilities](#capabilities)
+- [End-to-end workflow](#end-to-end-workflow)
+- [Engineering methods](#engineering-methods)
+  - [PVT engine](#1-pvt-engine)
+  - [Material balance and underground withdrawal](#2-material-balance-and-underground-withdrawal)
+  - [Gas-cap and aquifer model selection](#3-gas-cap-and-aquifer-model-selection)
+  - [Drive-mechanism interpretation](#4-drive-mechanism-interpretation)
+  - [OOIP and GIIP estimation](#5-ooip-and-giip-estimation)
+  - [Forecasting, DCA, and reserves](#6-forecasting-dca-and-reserves)
+- [Repository structure](#repository-structure)
+- [Installation](#installation)
+- [Run the application](#run-the-application)
+- [Input data format](#input-data-format)
+- [Synthetic validation datasets](#synthetic-validation-datasets)
+- [Testing](#testing)
+- [Assumptions and limitations](#assumptions-and-limitations)
+- [Future improvements](#future-improvements)
+- [Disclaimer](#disclaimer)
 
-## Project objectives
+---
 
-The long-term objectives of PyMBAL are to:
+## Capabilities
 
-1.  Load and validate reservoir production, pressure, and PVT datasets.
-2.  Prepare PVT properties at the pressure observations used in
-    reservoir analysis.
-3.  Calculate underground withdrawal and fluid/rock expansion terms.
-4.  Apply suitable material-balance formulations, including Havlena--Ode
-    analysis.
-5.  Evaluate the possible contributions of solution-gas expansion,
-    gas-cap expansion, rock/connate-water expansion, and aquifer influx.
-6.  Estimate OOIP and GIIP where the selected model and available data
-    support the calculation.
-7.  Compare and calibrate suitable aquifer models.
-8.  Support reservoir-performance interpretation, decline-curve
-    forecasting, and uncertainty analysis.
+| Module | Functionality |
+|---|---|
+| Data ingestion and QC | Loads reservoir history, validates required data, cleans and prepares the dataset |
+| PVT engine | Laboratory, correlation, and hybrid PVT workflows |
+| Reservoir state | Loads initial reservoir/fluid parameters and calculates initial PVT state |
+| Underground withdrawal | Computes oil, gas, and water withdrawal on a consistent reservoir-volume basis |
+| Material balance | Calculates expansion/withdrawal terms and performs MBE-based analysis, including Havlena–Ode estimation |
+| Coupled model selection | Evaluates alternative gas-cap and aquifer configurations against the observed reservoir history |
+| Aquifer modelling | Supports Schilthuis, Fetkovich, and Van Everdingen–Hurst water-influx formulations |
+| Gas-cap calibration | Estimates/compares gas-cap contribution as part of coupled reservoir-model calibration |
+| Drive interpretation | Evaluates contributions from solution-gas expansion, gas-cap expansion, water influx, and other expansion terms |
+| Volumetrics | Produces OOIP and, for gas-cap cases, GIIP estimates for successful candidate interpretations |
+| Material-balance forecasting | Projects reservoir-state/pressure behaviour under specified future assumptions |
+| Decline Curve Analysis | Fits and compares production-decline models and generates rate/cumulative forecasts |
+| Technical reserves | Calculates EUR and remaining technical volumes, applying an OOIP constraint where needed |
+| Reporting and visualization | Provides candidate comparison tables, drive-index summaries, plots, warnings, and a structured report |
+| User interface | Streamlit dashboard for CSV upload, model constraints, forecast assumptions, and result exploration |
 
-## Current implementation
+The application deliberately preserves multiple successful model candidates and flags ambiguous interpretations instead of hiding them behind a single output.
 
-The current public codebase includes:
+## End-to-end workflow
 
-  -----------------------------------------------------------------------
-  Component                           Current capability
-  ----------------------------------- -----------------------------------
-  Data loading                        Reads CSV and Excel (`.xlsx`,
-                                      `.xls`) files
-
-  Data validation                     Checks required columns, missing
-                                      values, negative values, and
-                                      availability of PVT properties
-
-  Data cleaning                       Converts dates, sorts records
-                                      chronologically, removes exact
-                                      duplicate rows, and flags unusual
-                                      cumulative-production or pressure
-                                      trends
-
-  Laboratory PVT mode                 Uses supplied PVT properties or
-                                      interpolates available laboratory
-                                      PVT data to requested reservoir
-                                      pressures
-
-  Correlation PVT mode                Calculates selected oil, gas, and
-                                      water properties using the
-                                      correlations listed below
-
-  Hybrid PVT mode                     Preserves available properties,
-                                      uses laboratory interpolation for
-                                      missing properties when supplied,
-                                      and calculates remaining missing
-                                      properties using the selected
-                                      correlations
-  -----------------------------------------------------------------------
-
-### Implemented PVT correlations
-
-  -------------------------------------------------------------------------
-  Fluid                   Implemented method      Properties/calculations
-  ----------------------- ----------------------- -------------------------
-  Oil                     Standing                Solution GOR (`Rs`),
-                                                  bubble-point pressure
-                                                  (`Pb`), oil FVF (`Bo`)
-
-  Gas                     Sutton pseudo-critical  Pseudo-critical and
-                          properties +            pseudo-reduced
-                          Hall--Yarborough        properties, gas
-                                                  compressibility factor
-                                                  (`Z`), gas FVF (`Bg`)
-
-  Water                   McCain                  Water FVF (`Bw`) and
-                                                  water viscosity
-  -------------------------------------------------------------------------
-
-The correlation registry also contains metadata for other correlations,
-including Vasquez--Beggs, Glaso, and Dranchuk--Abou-Kassem. Their
-presence in the registry does **not** mean that their calculation
-routines are currently implemented or selectable through the PVT engine.
-
-## Engineering workflow
-
-### Current workflow
-
-``` text
-Reservoir production / pressure dataset
-                |
-                v
-          Data loading
-                |
-                v
-      Required-column validation
-                |
-                v
-       Data quality checks
-                |
-                v
-        Date sorting / cleaning
-                |
-                v
-             PVT Engine
-       /          |          \
- Laboratory   Correlation   Hybrid
-       \          |          /
-                |
-                v
-       Prepared PVT dataset
+```text
+Reservoir History (CSV) + Reservoir Configuration
+                       |
+                       v
+              Data Loading & QC
+                       |
+                       v
+                  PVT Engine
+          Laboratory / Correlation / Hybrid
+                       |
+                       v
+             Initial Reservoir State
+                       |
+                       v
+             Underground Withdrawal
+                       |
+                       v
+          Expansion and Material Balance
+                       |
+                       v
+     Coupled Gas-Cap / Aquifer Model Selection
+          |             |              |
+          |             |              |
+        No influx     Schilthuis     Fetkovich / V-E-H
+          \             |              /
+           \____________|_____________/
+                       |
+                       v
+          Candidate Ranking & Identifiability
+                       |
+             __________|__________
+            |          |          |
+            v          v          v
+       Drive Index  OOIP/GIIP  MBE Forecast
+       Analysis     Volumetrics
+            |          |          |
+            |__________|__________|
+                       |
+                       v
+             DCA Forecast Scenarios
+                       |
+                       v
+             EUR / Technical Reserves
+                       |
+                       v
+          Visualizations and Engineering Report
 ```
 
-### Intended future workflow
-
-``` text
-Prepared reservoir and PVT data
-                |
-                v
- Reservoir-state calculations
-                |
-                v
- Underground withdrawal
-                |
-                v
- Material Balance Equation
-                |
-                v
- Gas-cap / aquifer evaluation
-                |
-                v
- OOIP / GIIP estimation
-                |
-                v
- Drive-mechanism interpretation
-                |
-                v
- Forecasting / recovery evaluation
-                |
-                v
- Sensitivity and uncertainty analysis
-```
-
-The second diagram is the development roadmap, not a description of
-functionality currently available in the public code.
-
-## PVT calculation methods
-
-The PVT engine supports three modes.
-
-### 1. Laboratory mode
-
-Uses PVT properties supplied by the user. If a separate laboratory PVT
-table is provided, the current implementation linearly interpolates
-available properties against pressure to obtain values at the reservoir
-pressure observations.
-
-Extrapolation outside the laboratory pressure range is disabled by
-default. Enabling extrapolation should be done cautiously and documented
-because a mathematical extrapolation is not a substitute for
-representative laboratory measurements.
-
-### 2. Correlation mode
-
-Calculates selected PVT properties using empirical correlations:
-
--   **Oil:** Standing correlations for `Rs`, `Pb`, and `Bo`.
--   **Gas:** Sutton pseudo-critical properties and Hall--Yarborough
-    calculation of `Z`, followed by `Bg`.
--   **Water:** McCain correlations for `Bw` and water viscosity.
-
-Correlation accuracy depends on fluid composition, input quality, and
-the range over which the correlation is appropriate. Correlation-derived
-values should be treated as estimates and checked against laboratory PVT
-data when available.
-
-### 3. Hybrid mode
-
-The hybrid workflow preserves PVT properties already present in the
-reservoir dataset. Where properties are missing, it uses a supplied
-laboratory PVT table first, then calculates remaining missing properties
-using the configured correlations.
-
-For a defensible engineering study, the source of every PVT property
-should be traceable (laboratory, correlation, or other source), and
-mixed-source datasets should be reviewed for consistency.
-
-## Input data
-
-The base reservoir dataset is expected to contain the following columns:
-
-  Column            Description                   Unit / format
-  ----------------- ----------------------------- ---------------
-  `Date`            Observation date              Date
-  `Days`            Elapsed time                  days
-  `Np_STB`          Cumulative oil production     STB
-  `Gp_Mscf`         Cumulative gas production     Mscf
-  `Wp_STB`          Cumulative water production   STB
-  `Pressure_psia`   Reservoir pressure            psia
-
-For correlation-based PVT calculations, the current validation workflow
-expects:
+---
 
-  Column                    Description                            Unit
-  ------------------------- -------------------------------------- ---------------
-  `Temperature_F`           Reservoir temperature                  °F
-  `Oil_API`                 Stock-tank oil gravity                 °API
-  `Gas_Gravity`             Gas specific gravity relative to air   dimensionless
-  `Water_Salinity_wt_pct`   Water salinity                         wt%
+## Engineering methods
 
-The PVT engine uses the following property-column names:
+### 1. PVT engine
 
-  Column             Description                     Unit
-  ------------------ ------------------------------- ---------
-  `Bo_rb_per_STB`    Oil formation volume factor     rb/STB
-  `Bg_rb_per_scf`    Gas formation volume factor     rb/scf
-  `Bw_rb_per_STB`    Water formation volume factor   rb/STB
-  `Rs_scf_per_STB`   Solution gas-oil ratio          scf/STB
+The PVT engine supports three operating modes:
 
-A separate laboratory PVT table, when used, should contain
-`Pressure_psia` and the PVT property columns to be interpolated.
+- **Laboratory mode:** uses supplied PVT measurements and pressure-based interpolation when laboratory tables are available.
+- **Correlation mode:** estimates selected fluid properties from fluid characteristics and reservoir conditions.
+- **Hybrid mode:** retains available measured properties, uses laboratory interpolation for missing values where possible, and calculates remaining missing properties using configured correlations.
 
-**Unit consistency is essential.** In particular, gas production is
-represented as Mscf in the sample reservoir dataset, whereas `Bg` is
-represented in rb/scf. Any downstream reservoir-volume calculation must
-convert Mscf to scf (multiply by 1,000) before multiplying by `Bg`.
+Implemented calculation methods include:
 
-## Installation
+| Fluid | Method | Main outputs |
+|---|---|---|
+| Oil | Standing correlations | Solution gas-oil ratio (`Rs`), bubble-point pressure (`Pb`), oil formation volume factor (`Bo`) |
+| Gas | Sutton pseudo-critical properties and Hall–Yarborough | Pseudo-critical/reduced properties, gas compressibility factor (`Z`), gas formation volume factor (`Bg`) |
+| Water | McCain correlations | Water formation volume factor (`Bw`) and water viscosity |
 
-### Requirements
+The PVT engine also contains interpolation and validation logic. Correlation-derived properties are estimates and should be checked against representative laboratory PVT data when available.
 
--   Python 3
--   Packages listed in `requirements.txt`
+### 2. Material balance and underground withdrawal
 
-### Setup
+The core workflow prepares the reservoir state, computes cumulative underground withdrawal, evaluates fluid/rock expansion terms, and applies material-balance formulations to the observed pressure/production history.
 
-Clone the repository:
+A conventional oil-reservoir MBE can be represented in the form:
 
-``` bash
-git clone https://github.com/Rudra03Rath/PyMBAL-An-Intelligent-Material-Balance-Reserve-Estimation-System.git
-cd PyMBAL-An-Intelligent-Material-Balance-Reserve-Estimation-System
-```
+[
+F=N(E_o+mE_g^*+E_{fw})+W_e
+]
 
-Create and activate a virtual environment (recommended):
+where:
 
-``` bash
-python -m venv .venv
-```
+- (F) = cumulative underground withdrawal
+- (N) = original oil in place
+- (E_o) = oil and solution-gas expansion term
+- (m) = initial gas-cap ratio
+- (E_g^*) = gas-cap expansion term
+- (E_{fw}) = rock and connate-water expansion term
+- (W_e) = cumulative water influx
 
-Windows:
+The implementation separates reservoir-state, expansion, gas-cap, material-balance, and underground-withdrawal calculations into dedicated modules. Consistent units and compatible volume bases are essential.
 
-``` bash
-.venv\Scripts\activate
-```
+### 3. Gas-cap and aquifer model selection
 
-macOS / Linux:
+PyMBAL evaluates alternative reservoir configurations rather than assuming one drive mechanism in advance. Model constraints can be supplied by the user (for example, gas-cap or aquifer presence, or a specified aquifer model); leaving the relevant constraints unknown allows the selection workflow to evaluate admissible candidates.
 
-``` bash
-source .venv/bin/activate
-```
+Supported water-influx model families:
 
-Install dependencies:
+| Model | Representation | Key modelling idea |
+|---|---|---|
+| Schilthuis | Steady-state aquifer | Water influx rate responds to the pressure difference through an influx/productivity coefficient |
+| Fetkovich | Finite aquifer | Represents finite aquifer storage and pressure depletion |
+| Van Everdingen–Hurst | Transient aquifer | Uses dimensionless transient influx response and pressure-history superposition |
 
-``` bash
-pip install -r requirements.txt
-```
+The calibration/selection layer compares model performance and physical validity, including the associated OOIP and gas-cap estimates. The selected model should be interpreted alongside the competitive candidate table and identifiability status.
 
-## Running the current workflow
+### 4. Drive-mechanism interpretation
 
-The current `app.py` is a command-line workflow that loads a configured
-sample file, validates and cleans the dataset, runs the selected PVT
-mode, and prints selected PVT output columns.
+The drive-mechanism interpretation layer consumes model-selection results and evaluates the relative contribution of the reservoir energy/expansion mechanisms represented by the selected case.
 
-1.  Open `app.py`.
-2.  Set `PVT_MODE` to one of:
-    -   `"laboratory"`
-    -   `"correlation"`
-    -   `"hybrid"`
-3.  Set `FILEPATH` to the input CSV or Excel file.
-4.  For correlation or hybrid calculations, review the configured
-    temperature, API gravity, gas gravity, and salinity values.
-5.  Run:
+Outputs include:
 
-``` bash
-python app.py
-```
+- Final drive-mechanism contribution/drive indices.
+- Drive-index history over the observed production period.
+- Dominant and overall drive interpretation.
+- Evidence and warnings associated with the selected configuration.
 
-The current application is not yet a complete material-balance or
-reserves-calculation application.
+Drive indices are model-dependent diagnostics. They should not be treated as direct measurements, and a single production trend (such as rising GOR or water cut) is not, by itself, proof of a particular drive mechanism.
 
-## Engineering background
+### 5. OOIP and GIIP estimation
 
-### Formation volume factors
+The volumetric analysis layer converts successful model-selection candidates into OOIP and, where a gas cap is present, GIIP estimates.
 
-Oil formation volume factor:
+It retains candidate-level estimates and competitive ranges rather than automatically averaging physically different interpretations. The selected numerical result remains conditional on the data, model family, configuration, and calibration assumptions.
 
-\[ B_o =
-`\frac{\text{oil volume at reservoir conditions}}{\text{oil volume at stock-tank conditions}}`{=tex}
-\]
+### 6. Forecasting, DCA, and reserves
 
-Gas formation volume factor:
+PyMBAL includes two distinct forecasting workflows:
 
-\[ B_g =
-`\frac{\text{gas volume at reservoir conditions}}{\text{gas volume at standard conditions}}`{=tex}
-\]
+**Material-balance reservoir-state forecast:** projects reservoir-state/pressure behaviour from the selected material-balance interpretation under user-specified future assumptions, such as forecast horizon, pressure-decline fraction, and expansion endpoint multiplier.
 
-Water formation volume factor:
+**Decline Curve Analysis (DCA):** evaluates production-rate decline models, compares successful fits, and constructs forecast rate/cumulative-production profiles. The selected DCA model is a mathematical fit ranking; it is not automatically the most geologically plausible long-term forecast.
 
-\[ B_w =
-`\frac{\text{water volume at reservoir conditions}}{\text{water volume at standard conditions}}`{=tex}
-\]
+The reserves layer uses DCA EUR and historical cumulative production, with the material-balance OOIP acting as an upper technical constraint. It reports raw versus constrained EUR and remaining technical reserves where applicable.
 
-Solution gas-oil ratio:
+> **Terminology:** OOIP/GIIP are in-place quantities. EUR is a forecasted ultimate production quantity. Remaining technical reserves in this project are model-derived technical estimates; they are not independently certified commercial reserves or a formal reserves classification.
 
-\[ R_s =
-`\frac{\text{solution gas at standard conditions}}{\text{stock-tank oil volume}}`{=tex}
-\]
-
-These properties are required to convert surface production volumes to
-consistent reservoir-condition volumes and to evaluate fluid expansion.
-
-### Material balance concept
-
-The material balance equation is based on conservation of mass. In a
-reservoir-scale accounting model, cumulative underground withdrawal is
-balanced by the expansion of reservoir fluids, rock/connate-water
-effects, and any influx from an aquifer, subject to the selected
-reservoir model and its assumptions.
-
-A commonly used general form for a conventional oil reservoir is:
-
-\[ F = N(E_o + mE_g\^\* + E\_{fw}) + W_e \]
-
-where the terms represent underground withdrawal, oil/solution-gas
-expansion, gas-cap expansion, rock/connate-water expansion, and
-cumulative water influx. Definitions and volume bases must be kept
-consistent for the chosen formulation.
-
-**This equation is included as engineering context. The current public
-repository does not yet implement the complete material-balance
-workflow.**
-
-## Planned development roadmap
-
-The following are intended future development stages:
-
--   [ ] Reservoir-state and initial-condition calculations
--   [ ] Underground-withdrawal calculations with unit-consistent gas
-    accounting
--   [ ] Oil-reservoir material balance formulations
--   [ ] Havlena--Ode analysis and parameter estimation
--   [ ] Gas-cap identification and estimation
--   [ ] Aquifer models, including Schilthuis and additional
-    transient/finite-aquifer options
--   [ ] Drive-mechanism interpretation with supporting evidence
--   [ ] OOIP and GIIP estimation workflows
--   [ ] Decline Curve Analysis and production forecasting
--   [ ] Recovery and remaining-volume evaluation
--   [ ] Sensitivity and uncertainty analysis
--   [ ] Engineering plots and reporting
--   [ ] Expanded validation against benchmark problems and suitable
-    field datasets
-
-## Current limitations and engineering cautions
-
--   Empirical PVT correlations are approximations and may not represent
-    unusual or compositionally complex fluids.
--   Linear interpolation is an approximation; PVT behaviour may be
-    nonlinear, particularly near phase transitions.
--   Extrapolated PVT values can be unreliable and should be flagged.
--   A representative average reservoir pressure is essential for
-    meaningful material-balance interpretation.
--   A single-tank material-balance model may be unsuitable for strongly
-    compartmentalized reservoirs or systems with significant pressure
-    gradients.
--   Aquifer influx, gas-cap size, and OOIP can be difficult to identify
-    uniquely from pressure and production history alone.
--   Synthetic/sample data are useful for software testing but do not
-    establish field accuracy.
--   Reserves evaluation requires production forecasts, technical and
-    commercial assumptions, and the applicable reserves classification
-    framework. An in-place estimate alone is not a reserves estimate.
-
-Future engineering validation should include unit tests, analytical
-benchmark cases, sensitivity checks, comparison with trusted
-calculations/software, and---where available---representative laboratory
-and field data.
+---
 
 ## Repository structure
 
-``` text
-PyMBAL-An-Intelligent-Material-Balance-Reserve-Estimation-System/
+The principal project layout is:
+
+```text
+PyMBAL/
 │
 ├── app.py
 ├── requirements.txt
 ├── README.md
+├── generate_8_coupled_synthetic_datasets.py
 │
 ├── data/
+│   ├── reservoir_config/
+│   │   └── reservoir_parameters.json
 │   └── sample_data/
 │       ├── sample_material_balance_data.csv
 │       ├── sample_correlation_pvt_data.xlsx
-│       └── sample_hybrid_pvt_data.xlsx
+│       ├── sample_hybrid_pvt_data.xlsx
+│       ├── synthetic_closed_oil_reservoir.csv
+│       ├── synthetic_gas_cap_reservoir.csv
+│       ├── synthetic_water_influx_reservoir.csv
+│       ├── synthetic_fetkovich_reservoir.csv
+│       └── synthetic_8_cases/
 │
 ├── src/
+│   ├── analysis/
+│   │   ├── drive_mechanism.py
+│   │   ├── model_selection.py
+│   │   ├── reserves.py
+│   │   └── volumetrics.py
+│   ├── core/
+│   │   ├── expansion.py
+│   │   ├── gas_cap.py
+│   │   ├── gas_cap_calibration.py
+│   │   ├── material_balance.py
+│   │   ├── reservoir.py
+│   │   └── underground_withdrawal.py
+│   ├── forecasting/
+│   │   ├── forecasting.py
+│   │   └── scenarios.py
+│   ├── influx/
+│   │   ├── base.py
+│   │   ├── calibration.py
+│   │   ├── fetkovich.py
+│   │   ├── gas_cap_aquifer_calibration.py
+│   │   ├── mb_calibration.py
+│   │   ├── model_selection.py
+│   │   ├── schilthuis.py
+│   │   └── van_everdingen_hurst.py
+│   ├── models/
+│   │   └── synthetic_reservoir.py
 │   ├── pvt/
-│   │   ├── __init__.py
 │   │   ├── correlations.py
 │   │   ├── gas.py
 │   │   ├── interpolation.py
 │   │   ├── oil.py
 │   │   ├── pvt_engine.py
 │   │   └── water.py
-│   │
-│   └── utils/
-│       ├── cleaner.py
-│       ├── loader.py
-│       └── validator.py
+│   ├── reporting/
+│   │   └── report.py
+│   ├── ui/
+│   │   └── streamlit_app.py
+│   ├── utils/
+│   │   ├── cleaner.py
+│   │   ├── loader.py
+│   │   └── validator.py
+│   └── visualization/
+│       └── plots.py
 │
-├── test_gas.py
-├── test_interpolation.py
-├── test_oil.py
-├── test_pvt_engine.py
-└── test_water.py
+└── tests/
+    ├── test_8_coupled_scenarios.py
+    ├── test_drive_mechanism.py
+    └── additional module-level tests
 ```
+
+---
+
+## Installation
+
+### Prerequisites
+
+- Python 3.10 or later recommended.
+- Git.
+- A terminal or command prompt.
+
+### 1. Clone the repository
+
+```bash
+git clone https://github.com/Rudra03Rath/PyMBAL-An-Intelligent-Material-Balance-Reserve-Estimation-System.git
+cd PyMBAL-An-Intelligent-Material-Balance-Reserve-Estimation-System
+```
+
+### 2. Create a virtual environment
+
+```bash
+python -m venv .venv
+```
+
+Activate it:
+
+**Windows**
+```bash
+.venv\Scripts\activate
+```
+
+**macOS / Linux**
+```bash
+source .venv/bin/activate
+```
+
+### 3. Install dependencies
+
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+The current `requirements.txt` includes NumPy, pandas, Matplotlib, Plotly, SciPy, Streamlit, openpyxl, scikit-learn, and ReportLab.
+
+---
+
+## Run the application
+
+The primary user interface is the Streamlit dashboard.
+
+From the project root, run:
+
+```bash
+streamlit run app.py
+```
+
+Then open the local URL printed by Streamlit in your browser.
+
+### Dashboard workflow
+
+1. Upload a reservoir-history **CSV** file using the sidebar.
+2. Select the reservoir configuration JSON file (the default configuration is under `data/reservoir_config/`).
+3. Specify gas-cap presence and aquifer presence as **Unknown**, **Present**, or **Absent**, as appropriate.
+4. Optionally specify a gas-cap ratio (m) or a particular aquifer model.
+5. Set future forecast assumptions (forecast horizon, pressure-decline fraction, and expansion endpoint multiplier).
+6. Run the pipeline and inspect the executive summary, candidate models, drive-mechanism analysis, volumetrics, forecast, DCA, reserves, and engineering report tabs.
+
+Leaving constraints as **Unknown** allows the model-selection layer to evaluate the admissible configurations. Supplying a constraint narrows the set of candidate cases and should be based on independent geological, petrophysical, or field evidence.
+
+### Command-line execution
+
+The project also retains a command-line wrapper:
+
+```bash
+python app.py
+```
+
+This uses the default input/configuration paths defined in `app.py` and prints a summary. The Streamlit dashboard is the intended interactive workflow.
+
+---
+
+## Input data format
+
+The dashboard accepts a reservoir-history CSV. The pipeline validates required columns before analysis. The principal historical data fields used by the project include:
+
+| Column | Meaning | Expected unit |
+|---|---|---|
+| `Date` | Observation date | Date |
+| `Days` | Elapsed time | days |
+| `Np_STB` | Cumulative oil production | STB |
+| `Gp_Mscf` | Cumulative gas production | Mscf |
+| `Wp_STB` | Cumulative water production | STB |
+| `Pressure_psia` | Average reservoir pressure | psia |
+
+PVT preparation may additionally use:
+
+| Column | Meaning | Unit |
+|---|---|---|
+| `Temperature_F` | Reservoir temperature | °F |
+| `Oil_API` | Stock-tank oil gravity | °API |
+| `Gas_Gravity` | Gas specific gravity relative to air | dimensionless |
+| `Water_Salinity_wt_pct` | Water salinity | wt% |
+| `Bo_rb_per_STB` | Oil formation volume factor | rb/STB |
+| `Bg_rb_per_scf` | Gas formation volume factor | rb/scf |
+| `Bw_rb_per_STB` | Water formation volume factor | rb/STB |
+| `Rs_scf_per_STB` | Solution gas-oil ratio | scf/STB |
+
+A separate laboratory PVT table, when used, should include `Pressure_psia` and the relevant PVT property columns.
+
+**Unit consistency warning:** if gas production is stored in Mscf and (B_g) is in rb/scf, convert gas production to scf before multiplying by (B_g). Also ensure that pressure is average reservoir pressure appropriate to the tank model—not flowing tubing pressure or flowing bottom-hole pressure.
+
+For the exact required columns and validation rules, refer to the data validation and pipeline input checks in the source code. The sample files under `data/sample_data/` provide starting points for the supported workflows.
+
+---
+
+## Synthetic validation datasets
+
+The repository includes synthetic reservoir histories used to exercise the engineering workflow, including closed oil, gas-cap, and water-influx cases.
+
+The script `generate_8_coupled_synthetic_datasets.py` generates eight coupled scenarios:
+
+1. No gas cap and no aquifer.
+2. Gas cap without aquifer.
+3. Schilthuis aquifer without gas cap.
+4. Fetkovich aquifer without gas cap.
+5. Van Everdingen–Hurst aquifer without gas cap.
+6. Gas cap with Schilthuis aquifer.
+7. Gas cap with Fetkovich aquifer.
+8. Gas cap with Van Everdingen–Hurst aquifer.
+
+Generate the datasets from the project root:
+
+```bash
+python generate_8_coupled_synthetic_datasets.py
+```
+
+The generated CSV files are written under:
+
+```text
+data/sample_data/synthetic_8_cases/
+```
+
+These scenarios are useful for controlled testing because their generating assumptions are known. Recovering those assumptions is a test of the implementation under the synthetic model—not proof that the same model will be uniquely identifiable in a real reservoir.
+
+---
+
+## Testing
+
+Run the available tests from the repository root:
+
+```bash
+python -m pytest
+```
+
+Or run a particular test module, for example:
+
+```bash
+python -m pytest tests/test_8_coupled_scenarios.py
+python -m pytest tests/test_drive_mechanism.py
+```
+
+Some legacy or module-specific test scripts may also exist at the repository root. Use the tests relevant to the module being changed and add regression tests when modifying engineering equations, unit conversions, calibration bounds, or model-selection logic.
+
+---
+
+## Assumptions and limitations
+
+1. **Input quality governs output quality.** Production allocation, pressure surveys, PVT quality, dates, and unit consistency directly affect the results.
+2. **Average reservoir pressure matters.** Material balance requires representative average reservoir pressure for the tank under study. Flowing pressure measurements cannot be substituted without a justified conversion/model.
+3. **Tank assumptions matter.** A single-tank MBE may not represent strongly compartmentalized reservoirs, major pressure gradients, or complex communication.
+4. **Model non-uniqueness is real.** Different combinations of OOIP, gas-cap size, and aquifer parameters may produce similar history matches. A low error metric does not establish a unique geological explanation.
+5. **Aquifer formulations have different assumptions.** Schilthuis, Fetkovich, and Van Everdingen–Hurst should not be treated as interchangeable curve-fitting options; select/calibrate them in light of aquifer geometry, finite/infinite behaviour, and pressure history.
+6. **PVT correlations are empirical.** Their reliability depends on fluid composition and the range of applicability. Laboratory measurements should take precedence when representative and reliable.
+7. **Forecasts are conditional.** Material-balance forecasts and DCA forecasts depend on user-selected assumptions and extrapolation of historical behaviour. Forecast uncertainty generally increases with forecast duration.
+8. **DCA ranking is mathematical.** A best-fit decline model may be statistically preferred over the observed history but physically inappropriate beyond the history period.
+9. **Technical reserves are not booked reserves.** Commerciality, project maturity, operating constraints, economic limits, and the applicable reserves classification framework are outside a purely technical calculation.
+10. **Synthetic data are not field validation.** Synthetic cases verify controlled behaviours; representative field data and independent benchmark comparisons are still required for broader validation.
+
+---
+
+## Future improvements
+
+Potential next steps include:
+
+- Broader unit and dimensional-consistency checks across all modules.
+- More benchmark problems and comparisons against independently verified calculations.
+- Stronger uncertainty quantification for OOIP, GIIP, aquifer parameters, forecasts, and reserves.
+- Additional fluid models for compositionally complex oils and gas condensates.
+- More explicit diagnostic plots and sensitivity summaries for model identifiability.
+- Downloadable, reproducible engineering reports with input assumptions and calculation provenance.
+- Field-data validation and calibration workflows.
+
+---
 
 ## Disclaimer
 
-PyMBAL is an academic and placement-oriented petroleum engineering
-project. Its outputs should not be used as the sole basis for
-field-development, investment, drilling, production, or
-reserves-reporting decisions. Engineering calculations require
-independent verification, representative input data, suitable model
-assumptions, and review by qualified professionals.
+PyMBAL is an academic and portfolio project developed for petroleum-engineering analysis and learning. It is provided “as is”, without warranty of accuracy or fitness for a particular purpose. Its outputs must be independently reviewed and verified before being used in operational, investment, development-planning, or reserves-reporting decisions. The user is responsible for checking the input data, units, assumptions, model applicability, and applicable professional standards.
